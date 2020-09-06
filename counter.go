@@ -43,6 +43,8 @@ var data map[string]*metric
 var globalLock sync.Mutex
 
 const persistenceInterval = 30 * time.Second
+const lruInterval = 5 * time.Minute
+const retentionDuration = time.Duration(6 * time.Hour)
 const dataDir = "data"
 
 func getMetricList(w http.ResponseWriter, r *http.Request) {
@@ -248,6 +250,44 @@ func restore() {
 	globalLock.Unlock()
 }
 
+func lru() {
+	for {
+		// Determine cut-off point
+		oldestTimeKey := time.Now().Add(-1 * retentionDuration).Format("2006-01-02 15:04")
+
+		// Get unique metric names
+		var metricNames []string
+		globalLock.Lock()
+		for metricName := range data {
+			metricNames = append(metricNames, metricName)
+		}
+		globalLock.Unlock()
+
+		for _, metricName := range metricNames {
+			// Get metric
+			globalLock.Lock()
+			m, ok := data[metricName]
+			if !ok {
+				continue
+			}
+			globalLock.Unlock()
+
+			// Remove old data
+			m.mutex.Lock()
+			for timeKey := range m.datapoints {
+				if timeKey < oldestTimeKey {
+					delete(m.datapoints, timeKey)
+					if debugMode() {
+						fmt.Printf("Removing old datapoint %s for %s\n", timeKey, metricName)
+					}
+				}
+			}
+			m.mutex.Unlock()
+		}
+		time.Sleep(lruInterval)
+	}
+}
+
 func persist() {
 	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
 		os.Mkdir(dataDir, 0700)
@@ -298,7 +338,8 @@ func main() {
 	// Set up buffered writer for incoming data
 	go appendMetrics(writeBuffer)
 
-	// TODO - LRU goroutine
+	// LRU goroutine
+	go lru()
 
 	// Peristence goroutine
 	go persist()
