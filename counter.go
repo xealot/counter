@@ -3,8 +3,11 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"math/rand"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +32,9 @@ type error struct {
 
 var data map[string]*metric
 var globalLock sync.Mutex
+
+const persistenceInterval = 30 * time.Second
+const dataDir = "data"
 
 func getMetric(w http.ResponseWriter, r *http.Request) {
 	metricName := chi.URLParam(r, "metricName")
@@ -143,8 +149,65 @@ func sampleData() {
 			}
 			globalLock.Unlock()
 		}
-		time.Sleep(200)
+		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+func restore() {
+	globalLock.Lock()
+	files, err := ioutil.ReadDir(dataDir)
+	if err != nil {
+		fmt.Println("Data directory could not be read, restore skipped")
+		return
+	}
+	for _, f := range files {
+		metricName := strings.Replace(f.Name(), ".json", "", 1)
+		datapoints := make(map[string]datapoint, 0)
+		file, err := ioutil.ReadFile(fmt.Sprintf("%s/%s", dataDir, f.Name()))
+		if err != nil {
+			fmt.Printf("Could not read %s/%s\n", dataDir, f.Name())
+			continue
+		}
+		json.Unmarshal(file, &datapoints)
+		data[metricName] = &metric{
+			datapoints: datapoints,
+		}
+	}
+	globalLock.Unlock()
+}
+
+func persist() {
+	if _, err := os.Stat(dataDir); os.IsNotExist(err) {
+		os.Mkdir(dataDir, 0700)
+	}
+	for {
+		globalLock.Lock()
+		for metricName, m := range data {
+			m.mutex.Lock()
+			file, err := os.OpenFile(
+				fmt.Sprintf("%s/%s.json", dataDir, metricName),
+				os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
+				os.ModePerm,
+			)
+			if err != nil {
+				fmt.Printf("Could not write %s to disk\n", metricName)
+				continue
+			}
+			encoder := json.NewEncoder(file)
+			encoder.Encode(m.datapoints)
+			file.Close()
+			if debugMode() {
+				fmt.Printf("Persisted %s to disk\n", metricName)
+			}
+			m.mutex.Unlock()
+		}
+		globalLock.Unlock()
+		time.Sleep(persistenceInterval)
+	}
+}
+
+func debugMode() bool {
+	return os.Getenv("DEBUG") != ""
 }
 
 func main() {
@@ -152,14 +215,16 @@ func main() {
 	r := chi.NewRouter()
 	r.Get("/metric/{metricName:[a-z-]+}", getMetric)
 	r.Get("/metric/{metricName:[a-z-]+}/{dimensionName:[a-z-]+}.png", getMetricChart)
-	// TODO - read API
+	// TODO - write API
 
 	// Set up global data store
 	data = make(map[string]*metric)
+	restore()
 
 	// TODO - LRU goroutine
 
-	// TODO - peristence goroutine
+	// Peristence goroutine
+	go persist()
 
 	// Spawn sample data goroutine
 	go sampleData()
