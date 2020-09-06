@@ -35,6 +35,10 @@ type error struct {
 	Error string `json:"error"`
 }
 
+type status struct {
+	Status string `json:"status"`
+}
+
 var data map[string]*metric
 var globalLock sync.Mutex
 
@@ -79,6 +83,65 @@ func getMetric(w http.ResponseWriter, r *http.Request) {
 			panic(err)
 		}
 		w.Write(response)
+	}
+}
+
+func writeMetrics(writeBuffer chan map[string]datapoint) func(w http.ResponseWriter, r *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		decoder := json.NewDecoder(r.Body)
+		var sample map[string]datapoint
+		err := decoder.Decode(&sample)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			response, _ := json.Marshal(error{Error: "Could not parse incoming metrics"})
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write(response)
+			return
+		}
+
+		// Queue data for processing and return response
+		writeBuffer <- sample
+		w.Header().Set("Content-Type", "application/json")
+		response, _ := json.Marshal(status{Status: "Queued"})
+		w.Write(response)
+	}
+}
+
+func appendMetrics(writeBuffer chan map[string]datapoint) {
+	for {
+		sample := <-writeBuffer
+		timeKey := time.Now().Format("2006-01-02 15:04")
+		for metricName, d := range sample {
+			globalLock.Lock()
+			m, ok := data[metricName]
+			globalLock.Unlock()
+
+			// Write count as 1 if no value received
+			if d.Count == 0 {
+				d.Count = 1
+			}
+
+			// Increment point if it exists, otherwise create a new point
+			if ok {
+				m.mutex.Lock()
+				if point, ok := m.datapoints[timeKey]; ok {
+					point.Count += d.Count
+					point.Value += d.Value
+					point.Average = point.Value / float64(point.Count)
+					m.datapoints[timeKey] = point
+				} else {
+					point := datapoint{Count: d.Count, Value: d.Value, Average: d.Value / float64(d.Count)}
+					m.datapoints[timeKey] = point
+				}
+				m.mutex.Unlock()
+			} else {
+				globalLock.Lock()
+				data[metricName] = &metric{
+					datapoints: make(map[string]datapoint, 0),
+				}
+				globalLock.Unlock()
+			}
+		}
 	}
 }
 
@@ -148,35 +211,16 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func sampleData() {
+func sampleData(writeBuffer chan map[string]datapoint) {
 	for {
 		metricName := "test"
-		timeKey := time.Now().Format("2006-01-02 15:04")
-		value := float64(rand.Int63n(100))
+		count := int(rand.Int63n(50))
+		value := float64(rand.Int63n(100)) * float64(count)
 
-		globalLock.Lock()
-		m, ok := data[metricName]
-		globalLock.Unlock()
-
-		if ok {
-			m.mutex.Lock()
-			if point, ok := m.datapoints[timeKey]; ok {
-				point.Count++
-				point.Value += value
-				point.Average = point.Value / float64(point.Count)
-				m.datapoints[timeKey] = point
-			} else {
-				point := datapoint{Count: 1, Value: value, Average: value}
-				m.datapoints[timeKey] = point
-			}
-			m.mutex.Unlock()
-		} else {
-			globalLock.Lock()
-			data[metricName] = &metric{
-				datapoints: make(map[string]datapoint, 0),
-			}
-			globalLock.Unlock()
+		writeBuffer <- map[string]datapoint{
+			metricName: datapoint{Count: count, Value: value},
 		}
+
 		time.Sleep(200 * time.Millisecond)
 	}
 }
@@ -241,13 +285,18 @@ func debugMode() bool {
 func main() {
 	// Set up router
 	r := chi.NewRouter()
+	writeBuffer := make(chan map[string]datapoint, 1000)
 	r.Get("/", getMetricList)
-	r.Get("/metric/{metricName:[a-z-]+}", getMetric)
-	r.Get("/metric/{metricName:[a-z-]+}/{dimensionName:[a-z-]+}.png", getMetricChart)
+	r.Post("/metric", writeMetrics(writeBuffer))
+	r.Get("/metric/{metricName:[a-z-.]+}", getMetric)
+	r.Get("/metric/{metricName:[a-z-.]+}/{dimensionName:[a-z]+}.png", getMetricChart)
 
 	// Set up global data store
 	data = make(map[string]*metric)
 	restore()
+
+	// Set up buffered writer for incoming data
+	go appendMetrics(writeBuffer)
 
 	// TODO - LRU goroutine
 
@@ -255,7 +304,7 @@ func main() {
 	go persist()
 
 	// Spawn sample data goroutine
-	go sampleData()
+	go sampleData(writeBuffer)
 
 	// Start server
 	port := "8080"
