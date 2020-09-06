@@ -21,6 +21,10 @@ type metric struct {
 	datapoints map[string]datapoint
 }
 
+type metricList struct {
+	Metrics []string `json:"metrics"`
+}
+
 type datapoint struct {
 	Value   float64 `json:"value"`
 	Count   int     `json:"count"`
@@ -36,6 +40,22 @@ var globalLock sync.Mutex
 
 const persistenceInterval = 30 * time.Second
 const dataDir = "data"
+
+func getMetricList(w http.ResponseWriter, r *http.Request) {
+	globalLock.Lock()
+	var metrics []string
+	for k := range data {
+		metrics = append(metrics, k)
+	}
+	sort.Strings(metrics)
+	globalLock.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	response, err := json.Marshal(metricList{Metrics: metrics})
+	if err != nil {
+		panic(err)
+	}
+	w.Write(response)
+}
 
 func getMetric(w http.ResponseWriter, r *http.Request) {
 	metricName := chi.URLParam(r, "metricName")
@@ -221,9 +241,9 @@ func debugMode() bool {
 func main() {
 	// Set up router
 	r := chi.NewRouter()
+	r.Get("/", getMetricList)
 	r.Get("/metric/{metricName:[a-z-]+}", getMetric)
 	r.Get("/metric/{metricName:[a-z-]+}/{dimensionName:[a-z-]+}.png", getMetricChart)
-	// TODO - write API
 
 	// Set up global data store
 	data = make(map[string]*metric)
