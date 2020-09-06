@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -72,11 +73,18 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 	if ok {
 		m.mutex.Lock()
 
+		// Get list of keys in order
+		var keys []string
+		for k := range m.datapoints {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
 		// Build up dataset
 		XValues := make([]time.Time, 0)
 		YValues := make([]float64, 0)
-		// TODO - sort timeseries
-		for k, v := range m.datapoints {
+		for _, k := range keys {
+			v := m.datapoints[k]
 			t, err := time.Parse("2006-01-02 15:04", k)
 			if err != nil {
 				fmt.Println("Could not parse time value")
@@ -97,7 +105,7 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 		// Generate chart
 		graph := chart.Chart{
 			XAxis: chart.XAxis{
-				ValueFormatter: chart.TimeHourValueFormatter,
+				ValueFormatter: chart.TimeMinuteValueFormatter,
 			},
 			Series: []chart.Series{
 				chart.TimeSeries{
