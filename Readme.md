@@ -21,6 +21,8 @@ Get a JSON representation of all samples currently being tracked for this metric
 
 Get a PNG representation of this metric, where operation is "sum", "count", or "avg"
 
+![Image](../blob/master/examples/avg.png?raw=true)
+
 ### POST /metric
 
 Send metrics to be tracked. Any unrecognized metrics will be created automatically.
