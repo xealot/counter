@@ -88,6 +88,73 @@ func getMetric(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func getMetricChart(w http.ResponseWriter, r *http.Request) {
+	metricName := chi.URLParam(r, "metricName")
+	dimensionName := chi.URLParam(r, "dimensionName")
+	zoneName, _ := time.Now().Zone()
+
+	// Find the requested data
+	globalLock.Lock()
+	m, ok := data[metricName]
+	globalLock.Unlock()
+	if ok {
+		m.mutex.Lock()
+
+		// Get list of keys in order
+		var keys []string
+		for k := range m.datapoints {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		// Build up dataset
+		XValues := make([]time.Time, 0)
+		YValues := make([]float64, 0)
+		for _, k := range keys {
+			v := m.datapoints[k]
+			t, err := time.Parse("2006-01-02 15:04 MST", fmt.Sprintf("%s %s", k, zoneName))
+			if err != nil {
+				fmt.Println("Could not parse time value")
+				continue
+			}
+			XValues = append(XValues, t)
+
+			switch dimensionName {
+			case "sum":
+				YValues = append(YValues, v.Value)
+			case "count":
+				YValues = append(YValues, float64(v.Count))
+			default:
+				YValues = append(YValues, v.Average)
+			}
+		}
+
+		// Generate chart
+		graph := chart.Chart{
+			XAxis: chart.XAxis{
+				ValueFormatter: chart.TimeMinuteValueFormatter,
+			},
+			Series: []chart.Series{
+				chart.TimeSeries{
+					XValues: XValues,
+					YValues: YValues,
+				},
+			},
+		}
+
+		m.mutex.Unlock()
+		w.Header().Set("Content-Type", "image/png")
+		graph.Render(chart.PNG, w)
+	} else {
+		w.Header().Set("Content-Type", "application/json")
+		response, err := json.Marshal(error{Error: "Could not find metric"})
+		if err != nil {
+			panic(err)
+		}
+		w.Write(response)
+	}
+}
+
 func writeMetrics(writeBuffer chan map[string]datapoint) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		decoder := json.NewDecoder(r.Body)
@@ -144,72 +211,6 @@ func appendMetrics(writeBuffer chan map[string]datapoint) {
 				globalLock.Unlock()
 			}
 		}
-	}
-}
-
-func getMetricChart(w http.ResponseWriter, r *http.Request) {
-	metricName := chi.URLParam(r, "metricName")
-	dimensionName := chi.URLParam(r, "dimensionName")
-
-	// Find the requested data
-	globalLock.Lock()
-	m, ok := data[metricName]
-	globalLock.Unlock()
-	if ok {
-		m.mutex.Lock()
-
-		// Get list of keys in order
-		var keys []string
-		for k := range m.datapoints {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-
-		// Build up dataset
-		XValues := make([]time.Time, 0)
-		YValues := make([]float64, 0)
-		for _, k := range keys {
-			v := m.datapoints[k]
-			t, err := time.Parse("2006-01-02 15:04", k)
-			if err != nil {
-				fmt.Println("Could not parse time value")
-				continue
-			}
-			XValues = append(XValues, t)
-
-			switch dimensionName {
-			case "sum":
-				YValues = append(YValues, v.Value)
-			case "count":
-				YValues = append(YValues, float64(v.Count))
-			default:
-				YValues = append(YValues, v.Average)
-			}
-		}
-
-		// Generate chart
-		graph := chart.Chart{
-			XAxis: chart.XAxis{
-				ValueFormatter: chart.TimeMinuteValueFormatter,
-			},
-			Series: []chart.Series{
-				chart.TimeSeries{
-					XValues: XValues,
-					YValues: YValues,
-				},
-			},
-		}
-
-		m.mutex.Unlock()
-		w.Header().Set("Content-Type", "image/png")
-		graph.Render(chart.PNG, w)
-	} else {
-		w.Header().Set("Content-Type", "application/json")
-		response, err := json.Marshal(error{Error: "Could not find metric"})
-		if err != nil {
-			panic(err)
-		}
-		w.Write(response)
 	}
 }
 
@@ -293,6 +294,7 @@ func persist() {
 		os.Mkdir(dataDir, 0700)
 	}
 	for {
+		time.Sleep(persistenceInterval)
 		globalLock.Lock()
 		for metricName, m := range data {
 			m.mutex.Lock()
@@ -314,7 +316,6 @@ func persist() {
 			m.mutex.Unlock()
 		}
 		globalLock.Unlock()
-		time.Sleep(persistenceInterval)
 	}
 }
 
