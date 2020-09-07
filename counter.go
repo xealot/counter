@@ -314,8 +314,8 @@ func main() {
 	writeBuffer := make(chan map[string]datapoint, 1000)
 	r.Get("/metric", getMetricList)
 	r.Post("/metric", writeMetrics(writeBuffer))
-	r.Get("/metric/{metricName:[a-z-.]+}", getMetric)
-	r.Get("/metric/{metricName:[a-z-.]+}/{dimensionName:[a-z]+}.png", getMetricChart)
+	r.Get("/metric/{metricName:[a-zA-Z0-9-.]+}", getMetric)
+	r.Get("/metric/{metricName:[a-zA-Z0-9-.]+}/{dimensionName:[a-z]+}.png", getMetricChart)
 
 	// Set up global data store
 	data = make(map[string]*metric)
