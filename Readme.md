@@ -4,7 +4,7 @@ Tracks sum, count, and average for any arbitrary metrics that you send to it.
 
 ## Installation
 
-Download the binary for your platform from the bin directory to the location where you want it
+Download the binary for your platform from the [bin directory](tree/master/bin) to the location where you want it
 to store data, then run it as an unpriviledged user. It will run on port 8080 by default.
 
 ## API endpoints
