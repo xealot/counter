@@ -1,0 +1,12 @@
+[Unit] 
+Description=statsd for humans
+
+[Service] 
+Restart=on-failure
+WorkingDirectory=/opt/counter
+ExecStart=/opt/counter/counter
+ExecReload=/bin/kill -HUP $MAINPID 
+KillSignal=SIGINT 
+
+[Install] 
+WantedBy=multi-user.target

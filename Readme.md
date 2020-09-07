@@ -42,3 +42,11 @@ count in your request. Count is optional, and will default to 1.
 
 If you no longer wish to track a metric, stop the server, delete its datafile in the data directory,
 then restart the server.
+
+## Installing systemd service so it starts on boot
+
+Assuming you install counter to /opt/counter on Ubuntu, you can download the counter.example.service
+and run the following:
+
+    sudo mv counter.example.service /lib/systemd/system/counter.service
+    sudo systemctl start counter
