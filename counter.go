@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"math/rand"
 	"net/http"
 	"os"
 	"sort"
@@ -214,20 +213,6 @@ func appendMetrics(writeBuffer chan map[string]datapoint) {
 	}
 }
 
-func sampleData(writeBuffer chan map[string]datapoint) {
-	for {
-		metricName := "test"
-		count := int(rand.Int63n(50))
-		value := float64(rand.Int63n(100)) * float64(count)
-
-		writeBuffer <- map[string]datapoint{
-			metricName: datapoint{Count: count, Value: value},
-		}
-
-		time.Sleep(200 * time.Millisecond)
-	}
-}
-
 func restore() {
 	globalLock.Lock()
 	files, err := ioutil.ReadDir(dataDir)
@@ -344,9 +329,6 @@ func main() {
 
 	// Peristence goroutine
 	go persist()
-
-	// Spawn sample data goroutine
-	go sampleData(writeBuffer)
 
 	// Start server
 	port := "8080"
