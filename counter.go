@@ -133,10 +133,16 @@ func getMetricChart(w http.ResponseWriter, r *http.Request) {
 			XAxis: chart.XAxis{
 				ValueFormatter: chart.TimeMinuteValueFormatter,
 			},
+			YAxis: chart.YAxis{
+				Range: &chart.ContinuousRange{
+					Min: 0,
+				},
+			},
 			Series: []chart.Series{
 				chart.TimeSeries{
 					XValues: XValues,
 					YValues: YValues,
+					
 				},
 			},
 		}
